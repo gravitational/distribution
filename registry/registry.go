@@ -135,34 +135,22 @@ func (registry *Registry) ListenAndServe() error {
 	}
 
 	if config.HTTP.TLS.Certificate != "" || config.HTTP.TLS.LetsEncrypt.CacheFile != "" {
-		var tlsMinVersion uint16
-		if config.HTTP.TLS.MinimumTLS == "" {
-			tlsMinVersion = tls.VersionTLS10
-		} else {
-			switch config.HTTP.TLS.MinimumTLS {
-			case "tls1.0":
-				tlsMinVersion = tls.VersionTLS10
-			case "tls1.1":
-				tlsMinVersion = tls.VersionTLS11
-			case "tls1.2":
-				tlsMinVersion = tls.VersionTLS12
-			default:
-				return fmt.Errorf("unknown minimum TLS level '%s' specified for http.tls.minimumtls", config.HTTP.TLS.MinimumTLS)
-			}
-			dcontext.GetLogger(registry.app).Infof("restricting TLS to %s or higher", config.HTTP.TLS.MinimumTLS)
-		}
 		tlsConf := &tls.Config{
 			ClientAuth:               tls.NoClientCert,
 			NextProtos:               nextProtos(config),
-			MinVersion:               tlsMinVersion,
+			MinVersion:               tls.VersionTLS12,
 			PreferServerCipherSuites: true,
+			// Use TLS Modern compatibility suites
+			// https://wiki.mozilla.org/Security/Server_Side_TLS
 			CipherSuites: []uint16{
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-				tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
 			},
 		}
 
