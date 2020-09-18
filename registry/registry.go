@@ -12,9 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"rsc.io/letsencrypt"
-
-	"github.com/Shopify/logrus-bugsnag"
+	logrus_bugsnag "github.com/Shopify/logrus-bugsnag"
 	logstash "github.com/bshuster-repo/logrus-logstash-hook"
 	"github.com/bugsnag/bugsnag-go"
 	"github.com/docker/distribution/configuration"
@@ -29,6 +27,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/yvasiyarov/gorelic"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // this channel gets notified when process receives signal. It is global to ease unit testing
@@ -158,7 +157,7 @@ func (registry *Registry) ListenAndServe() error {
 			if config.HTTP.TLS.Certificate != "" {
 				return fmt.Errorf("cannot specify both certificate and Let's Encrypt")
 			}
-			var m letsencrypt.Manager
+			var m autocert.Manager
 			if err := m.CacheFile(config.HTTP.TLS.LetsEncrypt.CacheFile); err != nil {
 				return err
 			}
