@@ -272,8 +272,17 @@ func configureLogging(ctx context.Context, config *configuration.Configuration) 
 			TimestampFormat: time.RFC3339Nano,
 		})
 	case "logstash":
+		logstashFields := log.Fields{"@version": "1", "type": "log"}
+		logstashFieldMap := log.FieldMap{
+			log.FieldKeyTime: "@timestamp",
+			log.FieldKeyMsg:  "message",
+		}
 		log.SetFormatter(&logstash.LogstashFormatter{
-			TimestampFormat: time.RFC3339Nano,
+			Formatter: &log.JSONFormatter{
+				TimestampFormat: time.RFC3339Nano,
+				FieldMap:        logstashFieldMap,
+			},
+			Fields: logstashFields,
 		})
 	default:
 		// just let the library use default on empty string.
