@@ -5,6 +5,19 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+
+	prometheus "github.com/docker/distribution/metrics"
+	events "github.com/docker/go-events"
+	"github.com/docker/go-metrics"
+)
+
+var (
+	// eventsCounter counts total events of incoming, success, failure, and errors
+	eventsCounter = prometheus.NotificationsNamespace.NewLabeledCounter("events", "The number of total events", "type", "endpoint")
+	// pendingGauge measures the pending queue size
+	pendingGauge = prometheus.NotificationsNamespace.NewLabeledGauge("pending", "The gauge of pending events in queue", metrics.Total, "endpoint")
+	// statusCounter counts the total notification call per each status code
+	statusCounter = prometheus.NotificationsNamespace.NewLabeledCounter("status", "The number of status code", "code", "endpoint")
 )
 
 // EndpointMetrics track various actions taken by the endpoint, typically by
@@ -22,14 +35,16 @@ type EndpointMetrics struct {
 // safeMetrics guards the metrics implementation with a lock and provides a
 // safe update function.
 type safeMetrics struct {
+	EndpointName string
 	EndpointMetrics
 	sync.Mutex // protects statuses map
 }
 
 // newSafeMetrics returns safeMetrics with map allocated.
-func newSafeMetrics() *safeMetrics {
+func newSafeMetrics(name string) *safeMetrics {
 	var sm safeMetrics
 	sm.Statuses = make(map[string]int)
+	sm.EndpointName = name
 	return &sm
 }
 
@@ -56,24 +71,32 @@ type endpointMetricsHTTPStatusListener struct {
 
 var _ httpStatusListener = &endpointMetricsHTTPStatusListener{}
 
-func (emsl *endpointMetricsHTTPStatusListener) success(status int, events ...Event) {
+func (emsl *endpointMetricsHTTPStatusListener) success(status int, event events.Event) {
 	emsl.safeMetrics.Lock()
 	defer emsl.safeMetrics.Unlock()
-	emsl.Statuses[fmt.Sprintf("%d %s", status, http.StatusText(status))] += len(events)
-	emsl.Successes += len(events)
+	emsl.Statuses[fmt.Sprintf("%d %s", status, http.StatusText(status))]++
+	emsl.Successes++
+
+	statusCounter.WithValues(fmt.Sprintf("%d %s", status, http.StatusText(status)), emsl.EndpointName).Inc(1)
+	eventsCounter.WithValues("Successes", emsl.EndpointName).Inc(1)
 }
 
-func (emsl *endpointMetricsHTTPStatusListener) failure(status int, events ...Event) {
+func (emsl *endpointMetricsHTTPStatusListener) failure(status int, event events.Event) {
 	emsl.safeMetrics.Lock()
 	defer emsl.safeMetrics.Unlock()
-	emsl.Statuses[fmt.Sprintf("%d %s", status, http.StatusText(status))] += len(events)
-	emsl.Failures += len(events)
+	emsl.Statuses[fmt.Sprintf("%d %s", status, http.StatusText(status))]++
+	emsl.Failures++
+
+	statusCounter.WithValues(fmt.Sprintf("%d %s", status, http.StatusText(status)), emsl.EndpointName).Inc(1)
+	eventsCounter.WithValues("Failures", emsl.EndpointName).Inc(1)
 }
 
-func (emsl *endpointMetricsHTTPStatusListener) err(err error, events ...Event) {
+func (emsl *endpointMetricsHTTPStatusListener) err(err error, event events.Event) {
 	emsl.safeMetrics.Lock()
 	defer emsl.safeMetrics.Unlock()
-	emsl.Errors += len(events)
+	emsl.Errors++
+
+	eventsCounter.WithValues("Errors", emsl.EndpointName).Inc(1)
 }
 
 // endpointMetricsEventQueueListener maintains the incoming events counter and
@@ -82,17 +105,22 @@ type endpointMetricsEventQueueListener struct {
 	*safeMetrics
 }
 
-func (eqc *endpointMetricsEventQueueListener) ingress(events ...Event) {
+func (eqc *endpointMetricsEventQueueListener) ingress(event events.Event) {
 	eqc.Lock()
 	defer eqc.Unlock()
-	eqc.Events += len(events)
-	eqc.Pending += len(events)
+	eqc.Events++
+	eqc.Pending++
+
+	eventsCounter.WithValues("Events", eqc.EndpointName).Inc()
+	pendingGauge.WithValues(eqc.EndpointName).Inc(1)
 }
 
-func (eqc *endpointMetricsEventQueueListener) egress(events ...Event) {
+func (eqc *endpointMetricsEventQueueListener) egress(event events.Event) {
 	eqc.Lock()
 	defer eqc.Unlock()
-	eqc.Pending -= len(events)
+	eqc.Pending--
+
+	pendingGauge.WithValues(eqc.EndpointName).Dec(1)
 }
 
 // endpoints is global registry of endpoints used to report metrics to expvar
@@ -149,4 +177,7 @@ func init() {
 	}))
 
 	registry.(*expvar.Map).Set("notifications", &notifications)
+
+	// register prometheus metrics
+	metrics.Register(prometheus.NotificationsNamespace)
 }

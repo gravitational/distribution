@@ -3,7 +3,7 @@ package testsuites
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -278,7 +278,7 @@ func (suite *DriverSuite) TestWriteReadLargeStreams(c *check.C) {
 	filename := randomPath(32)
 	defer suite.deletePath(c, firstPart(filename))
 
-	checksum := sha1.New()
+	checksum := sha256.New()
 	var fileSize int64 = 5 * 1024 * 1024 * 1024
 
 	contents := newRandReader(fileSize)
@@ -298,7 +298,7 @@ func (suite *DriverSuite) TestWriteReadLargeStreams(c *check.C) {
 	c.Assert(err, check.IsNil)
 	defer reader.Close()
 
-	writtenChecksum := sha1.New()
+	writtenChecksum := sha256.New()
 	io.Copy(writtenChecksum, reader)
 
 	c.Assert(writtenChecksum.Sum(nil), check.DeepEquals, checksum.Sum(nil))
@@ -345,7 +345,7 @@ func (suite *DriverSuite) TestReaderWithOffset(c *check.C) {
 	c.Assert(err, check.IsNil)
 	c.Assert(readContents, check.DeepEquals, contentsChunk3)
 
-	// Ensure we get invalid offest for negative offsets.
+	// Ensure we get invalid offset for negative offsets.
 	reader, err = suite.StorageDriver.Reader(suite.ctx, filename, -1)
 	c.Assert(err, check.FitsTypeOf, storagedriver.InvalidOffsetError{})
 	c.Assert(err.(storagedriver.InvalidOffsetError).Offset, check.Equals, int64(-1))

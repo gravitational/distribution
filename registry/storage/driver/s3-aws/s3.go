@@ -29,8 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
-	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	"github.com/aws/aws-sdk-go/aws/defaults"
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -366,7 +365,7 @@ func FromParameters(parameters map[string]interface{}) (*Driver, error) {
 	return New(params)
 }
 
-// getParameterAsInt64 converts paramaters[name] to an int64 value (using
+// getParameterAsInt64 converts parameters[name] to an int64 value (using
 // defaultt if nil), verifies it is no smaller than min, and returns it.
 func getParameterAsInt64(parameters map[string]interface{}, name string, defaultt int64, min int64, max int64) (int64, error) {
 	rv := defaultt
@@ -404,12 +403,8 @@ func New(params DriverParameters) (*Driver, error) {
 		return nil, fmt.Errorf("on Amazon S3 this storage driver can only be used with v4 authentication")
 	}
 
-	awsConfig := aws.NewConfig()
-	sess, err := session.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create new session: %v", err)
-	}
-	creds := credentials.NewChainCredentials([]credentials.Provider{
+	awsConfig := defaults.Config()
+	providers := []credentials.Provider{
 		&credentials.StaticProvider{
 			Value: credentials.Value{
 				AccessKeyID:     params.AccessKey,
@@ -417,10 +412,9 @@ func New(params DriverParameters) (*Driver, error) {
 				SessionToken:    params.SessionToken,
 			},
 		},
-		&credentials.EnvProvider{},
-		&credentials.SharedCredentialsProvider{},
-		&ec2rolecreds.EC2RoleProvider{Client: ec2metadata.New(sess)},
-	})
+	}
+	providers = append(providers, defaults.CredProviders(awsConfig, defaults.Handlers())...)
+	creds := credentials.NewChainCredentials(providers)
 
 	if params.RegionEndpoint != "" {
 		awsConfig.WithS3ForcePathStyle(true)
@@ -449,7 +443,7 @@ func New(params DriverParameters) (*Driver, error) {
 		}
 	}
 
-	sess, err = session.NewSession(awsConfig)
+	sess, err := session.NewSession(awsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new session with aws config: %v", err)
 	}
@@ -970,8 +964,19 @@ func (d *driver) doWalk(parentCtx context.Context, objectCount *int64, path, pre
 	defer done("s3aws.ListObjectsV2Pages(%s)", path)
 	listObjectErr := d.S3.ListObjectsV2PagesWithContext(ctx, listObjectsInput, func(objects *s3.ListObjectsV2Output, lastPage bool) bool {
 
-		*objectCount += *objects.KeyCount
-		walkInfos := make([]walkInfoContainer, 0, *objects.KeyCount)
+		var count int64
+		// KeyCount was introduced with version 2 of the GET Bucket operation in S3.
+		// Some S3 implementations don't support V2 now, so we fall back to manual
+		// calculation of the key count if required
+		if objects.KeyCount != nil {
+			count = *objects.KeyCount
+			*objectCount += *objects.KeyCount
+		} else {
+			count = int64(len(objects.Contents) + len(objects.CommonPrefixes))
+			*objectCount += count
+		}
+
+		walkInfos := make([]walkInfoContainer, 0, count)
 
 		for _, dir := range objects.CommonPrefixes {
 			commonPrefix := *dir.Prefix
